@@ -1,0 +1,62 @@
+os: linux
+dist: bionic
+language: generic
+sudo: required
+git:
+depth: 1
+addons:
+apt:
+update:
+  - true
+services:
+- docker
+before_install:
+- docker pull fr3akyphantom/droid-builder:latest
+before_script:
+- cd $home && mkdir twrp
+# download the twrp compressed source files from phantomzone54's release
+# uncomment & use below line if building for lollipop-based devices
+# - twrp_source="https://github.com/phantomzone54/twrp_sources_norepo/releases/download/v3.3.1-20200222/minimalomnirecovery-twrp-5.1-norepo-20200222.tar.xz"
+# use below line if building for marshmallow-based devices
+- twrp_source="https://github.com/phantomzone54/twrp_sources_norepo/releases/download/v3.3.1-20200222/minimalomnirecovery-twrp-6.0-norepo-20200222.tar.xz"
+# uncomment & use below line if building for nougat-based devices
+# - twrp_source="https://github.com/phantomzone54/twrp_sources_norepo/releases/download/v3.3.1-20200222/minimalomnirecovery-twrp-7.1-norepo-20200222.tar.xz"
+- wget -q ${twrp_source} -o $home/twrp.tar.xz
+- tar -xjf twrp.tar.xz --directory $home/twrp/ && rm twrp.tar.xz
+script:
+# replace your $$username$$, $$repo_url$$, $$brand$$, $$device$$
+- cd $home/twrp/ && git clone https://github.com/$$username$$/$$repo_url$$.git device/$$brand$$/$$device$$
+- rm -rf bootable/recovery && git clone https://github.com/omnirom/android_bootable_recovery -b android-9.0 --depth 1 bootable/recovery
+- |
+docker run --rm -i -e user_id=$(id -u) -e group_id=$(id -g) -v "$(pwd):/home/builder/twrp/:rw,z" -v "${home}/.ccache:/srv/ccache:rw,z" fr3akyphantom/droid-builder bash << eof
+cd /home/builder/twrp/
+source build/envsetup.sh
+# choose build flavor as "eng" or "userdebug"
+build_flavor="eng"
+lunch omni_$$device$$-${build_flavor}
+make -j$(nproc --all) recoveryimage
+exit
+eof
+after_success:
+- export version=$(cat bootable/recovery/variables.h | grep "define tw_main_version_str" | cut -d '"' -f2)
+- cp $home/twrp/out/target/product/$$device$$/recovery.img $home/twrp/twrp-$version-$$device$$-$(date +"%y%m%d")-unofficial.img
+- cd $home/twrp/
+# optional: you might need to switch from https://transfer.sh to https://file.io
+# - curl -s --upload-file twrp-$version-$$device$$-$(date +"%y%m%d")-unofficial.img https://transfer.sh/ && echo ""
+deploy:
+skip_cleanup: true
+provider: releases
+# the secret api_key will be loaded from the environment variables
+api_key: $gitoauthtoken
+file_glob: true
+file: $home/twrp/*.img
+on:
+tags: false
+repo: $$username$$/$$repo_url$$ # optional: if you want to deploy on different repository
+branch: master # optional: needs to be exact as the config branch
+branches:
+only:
+- master # set travis builder branch(es) names
+except:
+- /^(?i:untagged)-.*$/
+- /^v\d+\.\d+(\.\d+)?(-\s*)?$/
